@@ -1,43 +1,61 @@
 const express = require('express');
-const { Server } = require('socket.io');
 const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: { origin: "*" }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const users = new Map(); // familyCode → { role, socket }
+console.log("✅ Socket.IO сервер запущен");
 
 io.on('connection', (socket) => {
-  console.log('Клиент подключился:', socket.id);
+    console.log(`🔌 Клиент подключился: ${socket.id}`);
 
-  socket.on('register-child', (data) => {
-    users.set(data.familyCode, { role: 'CHILD', socket });
-    console.log(`Ребёнок зарегистрирован с кодом: ${data.familyCode}`);
-  });
+    // Регистрация родителя
+    socket.on('register-parent', (data) => {
+        const { familyCode } = data;
+        if (!familyCode) return;
 
-  socket.on('register-parent', (data) => {
-    users.set(data.familyCode, { role: 'PARENT', socket });
-    console.log(`Родитель зарегистрирован с кодом: ${data.familyCode}`);
-  });
+        socket.join(familyCode);
+        console.log(`👨 Родитель присоединился к комнате: ${familyCode}`);
+    });
 
-  socket.on('location-response', (data) => {
-    // Отправляем локацию всем родителям с этим кодом семьи
-    for (let [code, user] of users) {
-      if (user.role === 'PARENT' && code === data.familyCode) {
-        user.socket.emit('location-response', data);
-      }
-    }
-  });
+    // Регистрация ребёнка
+    socket.on('register-child', (data) => {
+        const { familyCode } = data;
+        if (!familyCode) return;
 
-  socket.on('disconnect', () => {
-    console.log('Клиент отключился');
-  });
+        socket.join(familyCode);
+        console.log(`👦 Ребёнок присоединился к комнате: ${familyCode}`);
+    });
+
+    // Получение локации от ребёнка и отправка всем в комнате (включая родителей)
+    socket.on('location-response', (data) => {
+        const { familyCode, latitude, longitude, accuracy, role } = data;
+
+        if (!familyCode || role !== "CHILD") return;
+
+        console.log(`📍 Получена локация от ребёнка (${familyCode}): ${latitude}, ${longitude}`);
+
+        // Отправляем локацию всем участникам комнаты (родителям)
+        io.to(familyCode).emit('location-response', {
+            familyCode,
+            latitude,
+            longitude,
+            accuracy: accuracy || 0,
+            timestamp: Date.now()
+        });
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`❌ Клиент отключился: ${socket.id}`);
+    });
 });
 
-const PORT = process.env.PORT || 3004;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
-  console.log(`✅ Socket.IO сервер запущен на порту ${PORT}`);
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
